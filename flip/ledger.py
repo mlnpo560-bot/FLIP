@@ -1,24 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
-import hashlib, json
-
-@dataclass(frozen=True)
-class Transaction:
-    sender: str
-    recipient: str
-    amount: Decimal
-    nonce: int
-    signature: str = ""
-
-    def payload(self) -> bytes:
-        return json.dumps({
-            "sender": self.sender, "recipient": self.recipient,
-            "amount": str(self.amount), "nonce": self.nonce
-        }, sort_keys=True, separators=(",", ":")).encode()
-
-    def txid(self) -> str:
-        return hashlib.sha256(self.payload()).hexdigest()
+from .transaction import Transaction
 
 @dataclass
 class LedgerAccount:
@@ -29,7 +12,7 @@ class LedgerError(ValueError):
     pass
 
 class NativeLedger:
-    """Deterministic single-state-machine prototype for native FLIP money."""
+    """Deterministic native-FLIP state machine."""
     def __init__(self):
         self.accounts: dict[str, LedgerAccount] = {}
         self.seen: set[str] = set()
@@ -45,18 +28,18 @@ class NativeLedger:
             raise LedgerError("negative genesis amount")
         self.account(address).balance += amount
 
-    def apply(self, tx: Transaction, verify_signature) -> str:
+    def apply(self, tx: Transaction) -> str:
         if tx.amount <= 0:
             raise LedgerError("amount must be positive")
         if tx.sender == tx.recipient:
             raise LedgerError("self-transfer")
         if tx.nonce < 0:
             raise LedgerError("invalid nonce")
+        if not tx.valid_signature():
+            raise LedgerError("invalid signature")
         txid = tx.txid()
         if txid in self.seen:
             raise LedgerError("replay")
-        if not verify_signature(tx):
-            raise LedgerError("invalid signature")
 
         sender = self.account(tx.sender)
         recipient = self.account(tx.recipient)
@@ -72,5 +55,7 @@ class NativeLedger:
         return txid
 
     def snapshot(self) -> dict:
-        return {a: {"balance": str(v.balance), "nonce": v.nonce)
-                for a, v in sorted(self.accounts.items())}
+        return {
+            address: {"balance": str(account.balance), "nonce": account.nonce}
+            for address, account in sorted(self.accounts.items())
+        }
