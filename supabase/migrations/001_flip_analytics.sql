@@ -1,6 +1,3 @@
--- Optional off-chain analytics/indexing schema.
--- Supabase is NOT part of FLIP consensus.
-
 create table if not exists public.flip_epochs (
   epoch bigint primary key,
   reference_index numeric(78,30) not null check (reference_index > 0),
@@ -21,13 +18,9 @@ alter table public.flip_epochs enable row level security;
 alter table public.flip_oracle_observations enable row level security;
 
 create policy "public can read flip epochs"
-on public.flip_epochs for select
-to anon, authenticated
-using (true);
+on public.flip_epochs for select to anon, authenticated using (true);
 
 create policy "public can read oracle observations"
-on public.flip_oracle_observations for select
-to anon, authenticated
-using (true);
+on public.flip_oracle_observations for select to anon, authenticated using (true);
 
--- No public write policy is created.
+-- No public write policy: writes belong to a trusted indexer/server process.
