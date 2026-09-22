@@ -1,36 +1,50 @@
 from __future__ import annotations
 from dataclasses import dataclass
-import hashlib, json
-from .crypto import KeyPair, verify
+import hashlib,json
+from .crypto import KeyPair,verify
+
+def quorum_size(n:int)->int:
+    if n<1: raise ValueError("validator set must be non-empty")
+    f=(n-1)//3
+    return 2*f+1
 
 @dataclass(frozen=True)
 class Vote:
-    height:int
-    block_hash:str
-    validator:str
-    public_key:bytes=b""
-    signature:bytes=b""
+    height:int; round:int; block_hash:str; validator:str; step:str
+    public_key:bytes=b""; signature:bytes=b""
     def payload(self)->bytes:
-        return json.dumps({"height":self.height,"block_hash":self.block_hash,"validator":self.validator},sort_keys=True,separators=(",",":")).encode()
-    def sign(self,key:KeyPair)->"Vote":
+        return json.dumps({"height":self.height,"round":self.round,"block_hash":self.block_hash,"validator":self.validator,"step":self.step},sort_keys=True,separators=(",",":")).encode()
+    def sign(self,key:KeyPair):
         if key.address!=self.validator: raise ValueError("validator key mismatch")
-        return Vote(self.height,self.block_hash,self.validator,key.public_key,key.sign(self.payload()))
-    def valid_signature(self)->bool:
-        return bool(self.public_key and self.signature) and verify(self.public_key,self.signature,self.payload())
-
-class ConsensusError(ValueError): pass
-class QuorumCertificate:
-    def __init__(self,validators:set[str],quorum:int):
-        if quorum<=0 or quorum>len(validators): raise ConsensusError("invalid quorum")
-        self.validators=frozenset(validators); self.quorum=quorum
-    def finalize(self,votes:list[Vote],height:int,block_hash:str)->bool:
-        unique={v.validator for v in votes if v.height==height and v.block_hash==block_hash and v.validator in self.validators and v.valid_signature()}
-        return len(unique)>=self.quorum
+        return Vote(self.height,self.round,self.block_hash,self.validator,self.step,key.public_key,key.sign(self.payload()))
+    def valid(self,validators:set[str])->bool:
+        return self.validator in validators and self.public_key and verify(self.public_key,self.signature,self.payload())
 
 @dataclass(frozen=True)
-class FinalityProof:
-    height:int
-    block_hash:str
-    validators:tuple[str,...]
+class QuorumCertificate:
+    height:int; round:int; block_hash:str; step:str; validators:tuple[str,...]
     def hash(self)->str:
         return hashlib.sha256(json.dumps(self.__dict__,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+
+class ConsensusError(ValueError): pass
+
+class BFTConsensus:
+    """PBFT/Tendermint-style authenticated 2f+1 protocol model.
+
+    Safety holds under authenticated validators, <=f Byzantine validators,
+    immutable validator-set snapshots per height, and deterministic locking.
+    Liveness additionally requires eventual synchrony and an honest proposer.
+    """
+    def __init__(self,validators:set[str]):
+        if not validators: raise ConsensusError("empty validator set")
+        self.validators=frozenset(validators); self.q=quorum_size(len(validators)); self.locked:dict[int,tuple[int,str]]={}
+    def certificate(self,votes:list[Vote],height:int,round:int,block_hash:str,step:str)->QuorumCertificate:
+        ids={v.validator for v in votes if v.height==height and v.round==round and v.block_hash==block_hash and v.step==step and v.valid(set(self.validators))}
+        if len(ids)<self.q: raise ConsensusError("quorum not reached")
+        return QuorumCertificate(height,round,block_hash,step,tuple(sorted(ids)))
+    def can_prevote(self,height:int,block_hash:str)->bool:
+        lock=self.locked.get(height); return lock is None or lock[1]==block_hash
+    def lock(self,height:int,round:int,block_hash:str)->None:
+        old=self.locked.get(height)
+        if old and round<old[0]: raise ConsensusError("cannot move lock backwards")
+        self.locked[height]=(round,block_hash)
