@@ -1,9 +1,9 @@
 # Supabase integration
 
-Supabase is an optional off-chain analytics/indexing layer.
+Supabase is an optional off-chain analytics/indexing layer. It is not FLIP consensus.
 
-It must NOT be used for consensus, authoritative monetary state, private signing keys, mint/burn authority or validator control.
+It must not hold private signing keys, authoritative monetary state, mint/burn authority, or validator control.
 
 The migration creates read-only public analytics tables with RLS enabled.
 
-The connected Supabase account currently has no projects, so no hosted database was provisioned. Connect or create a Supabase project before applying this migration.
+No hosted Supabase project is currently connected to this account, so the migration is committed for later deployment.
